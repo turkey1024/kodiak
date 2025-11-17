@@ -1,4 +1,12 @@
 [workspace]
-members = ["*"]
-exclude = ["archive", "assets", "makefiles", "target", ".cargo"]
+members = [
+    "client",
+    "server", 
+    "common",
+    "macros",
+    "plasma_protocol"
+]
+exclude = ["archive", "assets", "makefiles", "target", ".cargo", ".git", ".github"]
 resolver = "2"
+
+
