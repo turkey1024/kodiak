@@ -1,0 +1,196 @@
+name: Release Kodiak
+
+on:
+  push:
+    tags: ['v0.2.0']
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        targets: wasm32-unknown-unknown
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Fix Cargo.toml workspace configuration
+      run: |
+        # 检查 Cargo.toml 内容
+        echo "当前 Cargo.toml 内容:"
+        cat Cargo.toml
+        
+        # 修复 workspace 配置
+        if [ -f "Cargo.toml" ]; then
+          # 创建临时修复文件（使用单引号避免变量扩展）
+          cat > Cargo.toml.fixed << 'EOF'
+[workspace]
+members = [
+    "client",
+    "server", 
+    "common",
+    "macros",
+    "plasma_protocol",
+    "makefiles",
+]
+resolver = "2"
+
+[workspace.dependencies]
+kodiak-common = { path = "./common" }
+kodiak-macros = { path = "./macros" }
+kodiak-plasma_protocol = { path = "./plasma_protocol" }
+
+[workspace.package]
+version = "0.2.0"
+authors = ["Softbear, Inc."]
+edition = "2021"
+license = "LGPL-3.0-or-later"
+EOF
+          
+          # 追加原有的包定义
+          grep -A 1000 "\[package\]" Cargo.toml >> Cargo.toml.fixed
+          
+          # 替换原文件
+          mv Cargo.toml.fixed Cargo.toml
+          echo "修复后的 Cargo.toml:"
+          cat Cargo.toml
+        fi
+
+    - name: Build all crates
+      run: |
+        # 分别构建每个 crate，避免 workspace 问题
+        for crate in client server common macros plasma_protocol; do
+          if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
+            echo "=== 构建 $crate ==="
+            cargo build --release --manifest-path "$crate/Cargo.toml"
+          fi
+        done
+
+    - name: Build WebAssembly target
+      run: |
+        if [ -d "client" ] && [ -f "client/Cargo.toml" ]; then
+          cargo build --release --target wasm32-unknown-unknown --manifest-path "client/Cargo.toml"
+        fi
+
+    - name: Run tests
+      run: |
+        for crate in client server common macros plasma_protocol; do
+          if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
+            echo "=== 测试 $crate ==="
+            cargo test --release --manifest-path "$crate/Cargo.toml"
+          fi
+        done
+
+    - name: Create release package
+      run: |
+        # 创建版本目录
+        mkdir -p kodiak-0.2.0
+        
+        # 复制根目录文件
+        cp Cargo.toml Cargo.lock LICENSE README.md rustfmt.toml Makefile kodiak-0.2.0/ 2>/dev/null || true
+        
+        # 复制源代码目录
+        for dir in assets client server common macros plasma_protocol makefiles; do
+          if [ -d "$dir" ]; then
+            echo "复制目录: $dir"
+            cp -r "$dir" kodiak-0.2.0/
+          fi
+        done
+        
+        # 复制编译产物
+        if [ -d "target/release" ]; then
+          mkdir -p kodiak-0.2.0/target/release
+          find target/release -maxdepth 1 -type f -executable -exec cp {} kodiak-0.2.0/target/release/ \; 2>/dev/null || true
+        fi
+        
+        if [ -d "target/wasm32-unknown-unknown/release" ]; then
+          mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
+          cp target/wasm32-unknown-unknown/release/*.wasm kodiak-0.2.0/target/wasm32-unknown-unknown/release/ 2>/dev/null || true
+        fi
+        
+        # 创建压缩包
+        tar -czf kodiak-0.2.0.tar.gz kodiak-0.2.0/
+        sha256sum kodiak-0.2.0.tar.gz > kodiak-0.2.0.tar.gz.sha256
+        
+        echo "发布包内容:"
+        tar -tzf kodiak-0.2.0.tar.gz | head -30
+        echo "包大小: $(du -h kodiak-0.2.0.tar.gz)"
+
+    - name: Delete existing release if present
+      id: delete-release
+      uses: actions/github-script@v7
+      with:
+        script: |
+          try {
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: 'v0.2.0'
+            });
+            await github.rest.repos.deleteRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id
+            });
+            await github.rest.git.deleteRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'tags/v0.2.0'
+            });
+            console.log('已删除现有的 v0.2.0 发布和标签');
+          } catch (error) {
+            if (error.status === 404) {
+              console.log('未找到现有的 v0.2.0 发布');
+            } else {
+              throw error;
+            }
+          }
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v0.2.0
+        release_name: Kodiak 0.2.0
+        body: |
+          # Kodiak 0.2.0 Release
+          
+          Rust game engine for web-games.
+          
+          ## 构建信息
+          - **版本:** 0.2.0
+          - **构建日期:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Rust 版本:** stable
+          - **目标平台:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
+          
+          ## SHA256 校验和
+          `$(cat kodiak-0.2.0.tar.gz.sha256)`
+        files: |
+          kodiak-0.2.0.tar.gz
+          kodiak-0.2.0.tar.gz.sha256
+        draft: false
+        prerelease: false
+        replace_existing: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kodiak-0.2.0
+        path: |
+          kodiak-0.2.0.tar.gz
+          kodiak-0.2.0.tar.gz.sha256
+
+
