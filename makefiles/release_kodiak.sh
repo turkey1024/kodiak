@@ -86,34 +86,39 @@ mkdir -p "$TMPDIR"
 
 # 复制 .git 目录（手动创建git仓库）
 echo "Initializing git repository"
-cp -r .git "$TMPDIR/" 2>/dev/null || {
-    # 如果复制.git失败，初始化新的git仓库
+if [ -d ".git" ]; then
+    cp -r .git "$TMPDIR/" 2>/dev/null || {
+        echo "Warning: Could not copy .git directory, initializing new repository"
+        cd "$TMPDIR"
+        git init
+        REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "git@github.com:turkey1024/kodiak.git")
+        git remote add origin "$REMOTE_URL"
+        cd - >/dev/null
+    }
+else
     cd "$TMPDIR"
     git init
-    git remote add origin "$(git -C . remote get-url origin 2>/dev/null || echo "git@github.com:turkey1024/kodiak.git")"
+    git remote add origin "git@github.com:turkey1024/kodiak.git"
     cd - >/dev/null
-}
+fi
 
-# 复制文件，排除不需要的目录和文件
+# 复制文件，排除不需要的目录和文件（使用兼容的sh语法）
 echo "Copying files to repo"
-EXCLUDE_LIST=(
-    --exclude=".git"
-    --exclude=".github"
-    --exclude=".cargo"
-    --exclude=".ssh"
-    --exclude=".vscode"
-    --exclude="target"
-    --exclude="Cargo.lock"
-    --exclude=".gitlab-ci.yml"
-    --exclude="archive"
-    --exclude="manifest"
-    --exclude="sprite_sheet_util"
-    --exclude="uploader"
-    --exclude="*.bak"
-    --exclude="makefiles/release_kodiak.sh"
-)
 
-rsync -rlptv "${EXCLUDE_LIST[@]}" ./ "$TMPDIR/"
+# 使用find命令进行排除复制，避免数组语法
+cd .
+find . -maxdepth 1 ! -name '.' ! -name '.git' ! -name '.github' ! -name '.cargo' \
+    ! -name '.ssh' ! -name '.vscode' ! -name 'target' ! -name 'Cargo.lock' \
+    ! -name '.gitlab-ci.yml' ! -name 'archive' ! -name 'manifest' \
+    ! -name 'sprite_sheet_util' ! -name 'uploader' ! -name '*.bak' \
+    ! -name 'makefiles' -exec cp -r {} "$TMPDIR/" \; 2>/dev/null || true
+
+# 特殊处理makefiles目录（只复制需要的文件）
+if [ -d "makefiles" ]; then
+    mkdir -p "$TMPDIR/makefiles"
+    find makefiles -maxdepth 1 -type f ! -name 'release_kodiak.sh' ! -name '*.bak' \
+        -exec cp {} "$TMPDIR/makefiles/" \; 2>/dev/null || true
+fi
 
 # 清理备份文件
 echo "Removing .bak files if any"
