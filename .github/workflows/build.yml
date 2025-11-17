@@ -15,41 +15,50 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Install specific nightly toolchain
+    - name: Install latest nightly toolchain
       run: |
-        rustup toolchain install nightly-2024-04-20
-        rustup default nightly-2024-04-20
-        rustup target add wasm32-unknown-unknown --toolchain nightly-2024-04-20
-        rustup component add rust-src --toolchain nightly-2024-04-20
-        rustup component add rustfmt --toolchain nightly-2024-04-20
-        rustup component add clippy --toolchain nightly-2024-04-20
+        rustup toolchain install nightly --profile minimal
+        rustup default nightly
+        rustup target add wasm32-unknown-unknown
+        rustup component add rustfmt
+        rustup component add clippy
 
     - name: Verify toolchain
       run: |
-        echo "当前 Rust 版本:"
+        echo "=== Rust 工具链信息 ==="
         rustc --version
-        echo "当前工具链:"
+        cargo --version
         rustup show
 
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev
 
+    - name: Check dependencies
+      run: |
+        echo "=== 检查依赖关系 ==="
+        cargo tree
+        cargo update
+
     - name: Build workspace
       run: |
-        cargo +nightly-2024-04-20 build --release --workspace
+        echo "=== 构建工作空间 ==="
+        cargo build --release --workspace
 
     - name: Build WebAssembly target
       run: |
-        cargo +nightly-2024-04-20 build --release --target wasm32-unknown-unknown
+        echo "=== 构建 WebAssembly 目标 ==="
+        cargo build --release --target wasm32-unknown-unknown
 
     - name: Run tests
       run: |
-        cargo +nightly-2024-04-20 test --release --workspace
+        echo "=== 运行测试 ==="
+        cargo test --release --workspace
 
     - name: Create release package
       run: |
+        echo "=== 创建发布包 ==="
         # 创建版本目录
         mkdir -p kodiak-0.2.0
         
@@ -79,9 +88,10 @@ jobs:
         tar -czf kodiak-0.2.0.tar.gz kodiak-0.2.0/
         sha256sum kodiak-0.2.0.tar.gz > kodiak-0.2.0.tar.gz.sha256
         
-        echo "发布包内容:"
-        tar -tzf kodiak-0.2.0.tar.gz | head -30
+        echo "发布包内容预览:"
+        tar -tzf kodiak-0.2.0.tar.gz | head -20
         echo "包大小: $(du -h kodiak-0.2.0.tar.gz)"
+        echo "SHA256 校验和: $(cat kodiak-0.2.0.tar.gz.sha256)"
 
     - name: Delete existing release if present
       id: delete-release
@@ -126,8 +136,13 @@ jobs:
           ## 构建信息
           - **版本:** 0.2.0
           - **构建日期:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          - **Rust 版本:** nightly-2024-04-20
+          - **Rust 版本:** $(rustc --version)
           - **目标平台:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
+          
+          ## 包含内容
+          - 完整的源代码
+          - 编译后的二进制文件
+          - WebAssembly 模块
           
           ## SHA256 校验和
           `$(cat kodiak-0.2.0.tar.gz.sha256)`
@@ -147,5 +162,6 @@ jobs:
         path: |
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
+        retention-days: 30
 
 
