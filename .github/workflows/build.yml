@@ -32,41 +32,37 @@ jobs:
         echo "当前 Cargo.toml 内容:"
         cat Cargo.toml
         
-        # 修复 workspace 配置
-        if [ -f "Cargo.toml" ]; then
-          # 创建临时修复文件（使用单引号避免变量扩展）
-          cat > Cargo.toml.fixed << 'EOF'
-[workspace]
-members = [
-    "client",
-    "server", 
-    "common",
-    "macros",
-    "plasma_protocol",
-    "makefiles",
-]
-resolver = "2"
-
-[workspace.dependencies]
-kodiak-common = { path = "./common" }
-kodiak-macros = { path = "./macros" }
-kodiak-plasma_protocol = { path = "./plasma_protocol" }
-
-[workspace.package]
-version = "0.2.0"
-authors = ["Softbear, Inc."]
-edition = "2021"
-license = "LGPL-3.0-or-later"
-EOF
-          
-          # 追加原有的包定义
-          grep -A 1000 "\[package\]" Cargo.toml >> Cargo.toml.fixed
-          
-          # 替换原文件
-          mv Cargo.toml.fixed Cargo.toml
-          echo "修复后的 Cargo.toml:"
-          cat Cargo.toml
-        fi
+        # 创建修复后的 Cargo.toml 文件
+        echo "[workspace]" > Cargo.toml.fixed
+        echo "members = [" >> Cargo.toml.fixed
+        echo "    \"client\"," >> Cargo.toml.fixed
+        echo "    \"server\"," >> Cargo.toml.fixed
+        echo "    \"common\"," >> Cargo.toml.fixed
+        echo "    \"macros\"," >> Cargo.toml.fixed
+        echo "    \"plasma_protocol\"," >> Cargo.toml.fixed
+        echo "    \"makefiles\"," >> Cargo.toml.fixed
+        echo "]" >> Cargo.toml.fixed
+        echo "resolver = \"2\"" >> Cargo.toml.fixed
+        echo "" >> Cargo.toml.fixed
+        echo "[workspace.dependencies]" >> Cargo.toml.fixed
+        echo "kodiak-common = { path = \"./common\" }" >> Cargo.toml.fixed
+        echo "kodiak-macros = { path = \"./macros\" }" >> Cargo.toml.fixed
+        echo "kodiak-plasma_protocol = { path = \"./plasma_protocol\" }" >> Cargo.toml.fixed
+        echo "" >> Cargo.toml.fixed
+        echo "[workspace.package]" >> Cargo.toml.fixed
+        echo "version = \"0.2.0\"" >> Cargo.toml.fixed
+        echo "authors = [\"Softbear, Inc.\"]" >> Cargo.toml.fixed
+        echo "edition = \"2021\"" >> Cargo.toml.fixed
+        echo "license = \"LGPL-3.0-or-later\"" >> Cargo.toml.fixed
+        echo "" >> Cargo.toml.fixed
+        
+        # 追加原有的包定义
+        grep -A 1000 "\[package\]" Cargo.toml >> Cargo.toml.fixed
+        
+        # 替换原文件
+        mv Cargo.toml.fixed Cargo.toml
+        echo "修复后的 Cargo.toml:"
+        cat Cargo.toml
 
     - name: Build all crates
       run: |
@@ -192,5 +188,4 @@ EOF
         path: |
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
-
 
