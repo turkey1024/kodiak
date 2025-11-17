@@ -15,35 +15,82 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Install latest nightly toolchain
+    - name: Find compatible nightly version
+      id: find_version
       run: |
-        rustup toolchain install nightly --profile minimal
-        rustup default nightly
+        # 尝试几个已知兼容的 nightly 版本
+        VERSIONS=(
+          "2024-04-20"  # 原始版本，但缺少 edition2024
+          "2024-05-15"  # 可能支持 edition2024 且 API 兼容
+          "2024-06-01"  # 另一个候选版本
+          "2024-03-15"  # 更早的版本
+        )
+        
+        for version in "${VERSIONS[@]}"; do
+          echo "尝试安装 nightly-$version"
+          if rustup toolchain install nightly-$version --profile minimal; then
+            echo "成功安装 nightly-$version"
+            echo "version=$version" >> $GITHUB_OUTPUT
+            break
+          fi
+        done
+        
+        # 如果所有指定版本都失败，回退到最新版本
+        if [ -z "${{ steps.find_version.outputs.version }}" ]; then
+          echo "使用最新 nightly 版本"
+          rustup toolchain install nightly --profile minimal
+          echo "version=nightly" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Setup Rust toolchain
+      run: |
+        if [ "${{ steps.find_version.outputs.version }}" = "nightly" ]; then
+          rustup default nightly
+        else
+          rustup default nightly-${{ steps.find_version.outputs.version }}
+        fi
+        
         rustup target add wasm32-unknown-unknown
         rustup component add rustfmt
         rustup component add clippy
-
-    - name: Verify toolchain
-      run: |
-        echo "=== Rust 工具链信息 ==="
+        
+        echo "=== 当前工具链信息 ==="
         rustc --version
         cargo --version
-        rustup show
 
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev
 
-    - name: Check dependencies
+    - name: Check and update dependencies
       run: |
-        echo "=== 检查依赖关系 ==="
-        cargo tree
+        echo "=== 检查依赖兼容性 ==="
+        # 尝试更新到兼容的依赖版本
         cargo update
+        cargo tree
 
-    - name: Build workspace
+    - name: Build with fallback strategy
       run: |
-        echo "=== 构建工作空间 ==="
+        echo "=== 尝试构建工作空间 ==="
+        
+        # 首先尝试正常构建
+        if cargo build --release --workspace; then
+          echo "构建成功"
+          exit 0
+        fi
+        
+        echo "正常构建失败，尝试修复依赖..."
+        
+        # 如果构建失败，尝试修复 minicdn_macros 依赖
+        if grep -q "minicdn_macros" Cargo.lock; then
+          echo "检测到 minicdn_macros 依赖，尝试修复..."
+          # 尝试使用固定版本或替代方案
+          cargo update -p minicdn_macros
+        fi
+        
+        # 再次尝试构建
+        echo "=== 第二次构建尝试 ==="
         cargo build --release --workspace
 
     - name: Build WebAssembly target
@@ -163,5 +210,4 @@ jobs:
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
         retention-days: 30
-
 
