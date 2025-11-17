@@ -15,17 +15,13 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Install multiple Rust toolchains
+    - name: Install Rust toolchains
       run: |
-        # 安装旧版本用于编译 minicdn 相关依赖
-        echo "安装 nightly-2024-04-20 (兼容 minicdn_macros)"
+        # 安装旧版本用于编译 minicdn
         rustup toolchain install nightly-2024-04-20 --profile minimal
-        
-        # 安装新版本用于编译其他代码
-        echo "安装最新 nightly (支持 edition2024)"
+        # 安装新版本用于编译其他
         rustup toolchain install nightly --profile minimal
         
-        # 添加必要的组件和目标
         rustup target add wasm32-unknown-unknown --toolchain nightly-2024-04-20
         rustup target add wasm32-unknown-unknown --toolchain nightly
         rustup component add rustfmt --toolchain nightly-2024-04-20
@@ -33,137 +29,94 @@ jobs:
         rustup component add rustfmt --toolchain nightly
         rustup component add clippy --toolchain nightly
 
-    - name: Verify toolchains
+    - name: Build minicdn dependencies with old toolchain
       run: |
-        echo "=== 工具链版本信息 ==="
-        echo "旧版本:"
-        cargo +nightly-2024-04-20 --version
-        echo "新版本:"
-        cargo +nightly --version
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libssl-dev
-
-    - name: Build with hybrid toolchain strategy
-      run: |
-        echo "=== 开始混合工具链编译 ==="
+        echo "=== 第一步：用 nightly-2024-04-20 编译 minicdn 相关依赖 ==="
         
-        # 策略1: 先用旧版本编译基础依赖
-        echo "步骤1: 使用 nightly-2024-04-20 编译基础工作区"
-        cargo +nightly-2024-04-20 build --release --workspace || echo "基础编译可能部分失败，继续..."
+        # 先编译 minicdn_macros 和它的依赖
+        cargo +nightly-2024-04-20 build -p minicdn_macros --release || echo "minicdn_macros 编译可能失败"
         
-        # 策略2: 用新版本增量编译（跳过已编译的依赖）
-        echo "步骤2: 使用最新 nightly 增量编译"
-        cargo +nightly build --release --workspace
-        
-        # 策略3: 如果还有问题，分别编译各个模块
-        if [ $? -ne 0 ]; then
-          echo "步骤3: 分别编译各个模块"
-          
-          # 先编译不依赖 minicdn 的模块
-          for crate in common macros plasma_protocol; do
+        # 编译可能依赖 minicdn 的模块
+        for crate in client server; do
             if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
-              echo "编译 $crate (使用新工具链)"
-              cargo +nightly build --release -p kodiak-$crate || echo "$crate 编译失败，继续..."
+                echo "编译 $crate (使用旧工具链)"
+                cargo +nightly-2024-04-20 build --release -p $crate || echo "$crate 编译失败，继续..."
             fi
-          done
-          
-          # 用旧工具链编译可能依赖 minicdn 的模块
-          for crate in client server; do
-            if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
-              echo "编译 $crate (使用旧工具链)"
-              cargo +nightly-2024-04-20 build --release -p kodiak-$crate || echo "$crate 编译失败，继续..."
-            fi
-          done
-        fi
+        done
 
-    - name: Build WebAssembly targets
+    - name: Build other modules with new toolchain
       run: |
-        echo "=== 构建 WebAssembly 目标 ==="
+        echo "=== 第二步：用最新 nightly 编译其他模块 ==="
         
-        # 尝试用新版本构建 WASM
-        echo "尝试使用最新 nightly 构建 WASM"
-        cargo +nightly build --release --target wasm32-unknown-unknown || echo "WASM 构建失败，尝试旧版本"
-        
-        # 如果失败，用旧版本重试
-        if [ $? -ne 0 ]; then
-          echo "使用 nightly-2024-04-20 构建 WASM"
-          cargo +nightly-2024-04-20 build --release --target wasm32-unknown-unknown
-        fi
+        # 编译不依赖 minicdn 的模块
+        for crate in common macros plasma_protocol; do
+            if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
+                echo "编译 $crate (使用新工具链)"
+                cargo +nightly build --release -p $crate || echo "$crate 编译失败，继续..."
+            fi
+        done
+
+    - name: Build WebAssembly with new toolchain
+      run: |
+        echo "=== 第三步：构建 WebAssembly ==="
+        cargo +nightly build --release --target wasm32-unknown-unknown || echo "WASM 构建失败"
 
     - name: Run tests with appropriate toolchains
       run: |
-        echo "=== 运行测试 ==="
+        echo "=== 第四步：运行测试 ==="
         
-        # 分别运行不同模块的测试
+        # 用新工具链测试不依赖 minicdn 的模块
         for crate in common macros plasma_protocol; do
-          if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
-            echo "测试 $crate (新工具链)"
-            cargo +nightly test --release -p kodiak-$crate || echo "$crate 测试失败，继续..."
-          fi
+            if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
+                echo "测试 $crate (新工具链)"
+                cargo +nightly test --release -p $crate || echo "$crate 测试失败"
+            fi
         done
         
+        # 用旧工具链测试可能依赖 minicdn 的模块
         for crate in client server; do
-          if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
-            echo "测试 $crate (旧工具链)"
-            cargo +nightly-2024-04-20 test --release -p kodiak-$crate || echo "$crate 测试失败，继续..."
-          fi
+            if [ -d "$crate" ] && [ -f "$crate/Cargo.toml" ]; then
+                echo "测试 $crate (旧工具链)"
+                cargo +nightly-2024-04-20 test --release -p $crate || echo "$crate 测试失败"
+            fi
         done
 
     - name: Verify build artifacts
       run: |
         echo "=== 验证构建产物 ==="
-        
-        # 检查编译结果
-        echo "编译产物:"
-        find target/release -maxdepth 1 -type f -executable -exec echo "✓ {}" \; 2>/dev/null || echo "无二进制文件"
-        
-        echo "WASM 产物:"
-        find target/wasm32-unknown-unknown/release -name "*.wasm" -exec echo "✓ {}" \; 2>/dev/null || echo "无 WASM 文件"
-        
-        # 检查是否有至少一些编译成功的产物
-        if [ $(find target/release -maxdepth 1 -type f -executable 2>/dev/null | wc -l) -eq 0 ] && \
-           [ $(find target/wasm32-unknown-unknown/release -name "*.wasm" 2>/dev/null | wc -l) -eq 0 ]; then
-          echo "警告: 没有找到任何编译产物"
-        else
-          echo "✓ 找到编译产物，继续发布流程"
-        fi
+        echo "二进制文件:"
+        find target/release -maxdepth 1 -type f -executable | head -10
+        echo "WASM 文件:"
+        find target/wasm32-unknown-unknown/release -name "*.wasm" | head -10
 
     - name: Create release package
       run: |
         echo "=== 创建发布包 ==="
-        
-        # 创建版本目录
         mkdir -p kodiak-0.2.0
         
         # 复制根目录文件
-        cp Cargo.toml Cargo.lock LICENSE README.md rustfmt.toml Makefile kodiak-0.2.0/ 2>/dev/null || true
+        cp Cargo.toml Cargo.lock LICENSE README.md rustfmt.toml Makefile kodiak-0.2.0/ || true
         
         # 复制源代码目录
         for dir in client server common macros plasma_protocol; do
-          if [ -d "$dir" ]; then
-            echo "复制目录: $dir"
-            cp -r "$dir" kodiak-0.2.0/
-          fi
+            if [ -d "$dir" ]; then
+                cp -r "$dir" kodiak-0.2.0/
+            fi
         done
         
-        # 复制编译产物（包括可能在不同位置的文件）
+        # 复制编译产物
         mkdir -p kodiak-0.2.0/target/release
-        find target/release -maxdepth 1 -type f -executable -exec cp {} kodiak-0.2.0/target/release/ \; 2>/dev/null || true
+        find target/release -maxdepth 1 -type f -executable -exec cp {} kodiak-0.2.0/target/release/ \; || true
         
         mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
-        find target/wasm32-unknown-unknown/release -name "*.wasm" -exec cp {} kodiak-0.2.0/target/wasm32-unknown-unknown/release/ \; 2>/dev/null || true
+        find target/wasm32-unknown-unknown/release -name "*.wasm" -exec cp {} kodiak-0.2.0/target/wasm32-unknown-unknown/release/ \; || true
         
         # 创建压缩包
         tar -czf kodiak-0.2.0.tar.gz kodiak-0.2.0/
         sha256sum kodiak-0.2.0.tar.gz > kodiak-0.2.0.tar.gz.sha256
         
-        echo "发布包内容预览:"
-        tar -tzf kodiak-0.2.0.tar.gz | head -30
-        echo "包大小: $(du -h kodiak-0.2.0.tar.gz)"
-        echo "SHA256 校验和: $(cat kodiak-0.2.0.tar.gz.sha256)"
+        echo "包大小:"
+        du -h kodiak-0.2.0.tar.gz
 
     - name: Delete existing release if present
       id: delete-release
@@ -186,10 +139,10 @@ jobs:
               repo: context.repo.repo,
               ref: 'tags/v0.2.0'
             });
-            console.log('已删除现有的 v0.2.0 发布和标签');
+            console.log('Deleted existing release');
           } catch (error) {
             if (error.status === 404) {
-              console.log('未找到现有的 v0.2.0 发布');
+              console.log('No existing release found');
             } else {
               throw error;
             }
@@ -201,22 +154,9 @@ jobs:
         tag_name: v0.2.0
         release_name: Kodiak 0.2.0
         body: |
-          # Kodiak 0.2.0 Release
-          
-          Rust game engine for web-games.
-          
-          ## 构建信息
-          - **版本:** 0.2.0
-          - **构建日期:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          - **构建策略:** 混合工具链编译
-          - **使用的工具链:** nightly-2024-04-20 + 最新 nightly
-          - **目标平台:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
-          
-          ## 注意
-          此版本使用混合工具链策略编译，以解决依赖兼容性问题。
-          
-          ## SHA256 校验和
-          `$(cat kodiak-0.2.0.tar.gz.sha256)`
+          Kodiak 0.2.0 Release
+          Built with hybrid toolchain strategy
+          Rust version: mixed toolchains
         files: |
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
