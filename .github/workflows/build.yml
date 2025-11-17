@@ -3,7 +3,7 @@ name: Release Kodiak
 on:
   push:
     tags: ['v0.2.0']
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -13,44 +13,75 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # 获取所有历史记录，用于标签检测
+        fetch-depth: 0
 
-    - name: Setup Rust
-      uses: actions-rust-lang/setup-rust-toolchain@v1
-      with:
-        toolchain: stable
-        targets: wasm32-unknown-unknown
+    - name: Install specific nightly toolchain
+      run: |
+        rustup toolchain install nightly-2024-04-20
+        rustup default nightly-2024-04-20
+        rustup target add wasm32-unknown-unknown --toolchain nightly-2024-04-20
+        rustup component add rust-src --toolchain nightly-2024-04-20
+        rustup component add rustfmt --toolchain nightly-2024-04-20
+        rustup component add clippy --toolchain nightly-2024-04-20
+
+    - name: Verify toolchain
+      run: |
+        echo "当前 Rust 版本:"
+        rustc --version
+        echo "当前工具链:"
+        rustup show
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev
 
-    - name: Build in release mode
+    - name: Build workspace
       run: |
-        cargo build --release --all-targets
-        cargo test --release
+        cargo +nightly-2024-04-20 build --release --workspace
 
     - name: Build WebAssembly target
-      run: cargo build --release --target wasm32-unknown-unknown
+      run: |
+        cargo +nightly-2024-04-20 build --release --target wasm32-unknown-unknown
+
+    - name: Run tests
+      run: |
+        cargo +nightly-2024-04-20 test --release --workspace
 
     - name: Create release package
       run: |
-        # 创建临时目录结构
+        # 创建版本目录
         mkdir -p kodiak-0.2.0
-        # 复制源代码（排除不需要的文件）
-        cp -r Cargo.toml Cargo.lock src client server common macros plasma_protocol makefiles assets kodiak-0.2.0/
+        
+        # 复制根目录文件
+        cp Cargo.toml Cargo.lock LICENSE README.md rustfmt.toml Makefile kodiak-0.2.0/ 2>/dev/null || true
+        
+        # 复制源代码目录
+        for dir in client server common macros plasma_protocol; do
+          if [ -d "$dir" ]; then
+            echo "复制目录: $dir"
+            cp -r "$dir" kodiak-0.2.0/
+          fi
+        done
+        
         # 复制编译产物
-        mkdir -p kodiak-0.2.0/target/release
-        cp target/release/* kodiak-0.2.0/target/release/ 2>/dev/null || true
-        mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
-        cp target/wasm32-unknown-unknown/release/*.wasm kodiak-0.2.0/target/wasm32-unknown-unknown/release/ 2>/dev/null || true
+        if [ -d "target/release" ]; then
+          mkdir -p kodiak-0.2.0/target/release
+          find target/release -maxdepth 1 -type f -executable -exec cp {} kodiak-0.2.0/target/release/ \; 2>/dev/null || true
+        fi
+        
+        if [ -d "target/wasm32-unknown-unknown/release" ]; then
+          mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
+          cp target/wasm32-unknown-unknown/release/*.wasm kodiak-0.2.0/target/wasm32-unknown-unknown/release/ 2>/dev/null || true
+        fi
         
         # 创建压缩包
         tar -czf kodiak-0.2.0.tar.gz kodiak-0.2.0/
-        
-        # 创建校验和
         sha256sum kodiak-0.2.0.tar.gz > kodiak-0.2.0.tar.gz.sha256
+        
+        echo "发布包内容:"
+        tar -tzf kodiak-0.2.0.tar.gz | head -30
+        echo "包大小: $(du -h kodiak-0.2.0.tar.gz)"
 
     - name: Delete existing release if present
       id: delete-release
@@ -63,25 +94,20 @@ jobs:
               repo: context.repo.repo,
               tag: 'v0.2.0'
             });
-            
-            // 删除现有发布
             await github.rest.repos.deleteRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.data.id
             });
-            
-            // 删除现有标签
             await github.rest.git.deleteRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: 'tags/v0.2.0'
             });
-            
-            console.log('Deleted existing v0.2.0 release and tag');
+            console.log('已删除现有的 v0.2.0 发布和标签');
           } catch (error) {
             if (error.status === 404) {
-              console.log('No existing v0.2.0 release found');
+              console.log('未找到现有的 v0.2.0 发布');
             } else {
               throw error;
             }
@@ -97,12 +123,13 @@ jobs:
           
           Rust game engine for web-games.
           
-          ## Contents
-          - Source code
-          - Release binaries
-          - WebAssembly builds
+          ## 构建信息
+          - **版本:** 0.2.0
+          - **构建日期:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Rust 版本:** nightly-2024-04-20
+          - **目标平台:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
           
-          ## SHA256 Checksum
+          ## SHA256 校验和
           `$(cat kodiak-0.2.0.tar.gz.sha256)`
         files: |
           kodiak-0.2.0.tar.gz
@@ -120,5 +147,5 @@ jobs:
         path: |
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
-        retention-days: 30
+
 
