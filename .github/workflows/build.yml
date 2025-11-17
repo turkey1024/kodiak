@@ -3,7 +3,7 @@ name: Release Kodiak
 on:
   push:
     tags: ['v0.2.0']
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -13,7 +13,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # 获取所有历史记录，用于标签检测
+        fetch-depth: 0
 
     - name: Setup Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -26,32 +26,77 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev
 
-    - name: Build in release mode
+    - name: Fix workspace configuration
       run: |
-        cargo build --release --all-targets
-        cargo test --release
+        # 检查并修复 Cargo.toml 中的 workspace 配置
+        if grep -q "members.*\\.github" Cargo.toml; then
+          echo "修复 workspace 配置..."
+          # 创建备份
+          cp Cargo.toml Cargo.toml.backup
+          # 移除 .github 目录引用
+          sed -i '/members/,/]/ {/\.github/d}' Cargo.toml
+          echo "修复后的 Cargo.toml:"
+          cat Cargo.toml
+        fi
+
+    - name: Build workspace members
+      run: |
+        # 只构建实际的 workspace members
+        cargo build --release --workspace --exclude .github
+
+    - name: Build specific crates
+      run: |
+        # 分别构建各个 crate
+        for crate in client server common macros plasma_protocol; do
+          if [ -d "$crate" ]; then
+            echo "构建 $crate..."
+            cargo build --release -p kodiak-$crate
+          fi
+        done
 
     - name: Build WebAssembly target
-      run: cargo build --release --target wasm32-unknown-unknown
+      run: |
+        if [ -d "client" ]; then
+          cargo build --release --target wasm32-unknown-unknown -p kodiak-client
+        fi
+
+    - name: Run tests
+      run: |
+        cargo test --release --workspace --exclude .github
 
     - name: Create release package
       run: |
-        # 创建临时目录结构
+        # 创建版本目录
         mkdir -p kodiak-0.2.0
-        # 复制源代码（排除不需要的文件）
-        cp -r Cargo.toml Cargo.lock src client server common macros plasma_protocol makefiles assets kodiak-0.2.0/
+        
+        # 复制必要的文件
+        cp Cargo.toml Cargo.lock LICENSE README.md kodiak-0.2.0/
+        
+        # 复制源代码目录
+        for dir in src client server common macros plasma_protocol makefiles assets; do
+          if [ -d "$dir" ]; then
+            cp -r "$dir" kodiak-0.2.0/
+          fi
+        done
+        
         # 复制编译产物
         mkdir -p kodiak-0.2.0/target/release
-        cp target/release/* kodiak-0.2.0/target/release/ 2>/dev/null || true
-        mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
-        cp target/wasm32-unknown-unknown/release/*.wasm kodiak-0.2.0/target/wasm32-unknown-unknown/release/ 2>/dev/null || true
+        cp -r target/release/* kodiak-0.2.0/target/release/ 2>/dev/null || true
+        
+        if [ -d "target/wasm32-unknown-unknown/release" ]; then
+          mkdir -p kodiak-0.2.0/target/wasm32-unknown-unknown/release
+          cp target/wasm32-unknown-unknown/release/*.wasm kodiak-0.2.0/target/wasm32-unknown-unknown/release/ 2>/dev/null || true
+        fi
         
         # 创建压缩包
         tar -czf kodiak-0.2.0.tar.gz kodiak-0.2.0/
-        
-        # 创建校验和
         sha256sum kodiak-0.2.0.tar.gz > kodiak-0.2.0.tar.gz.sha256
+        
+        # 显示包内容
+        echo "发布包内容:"
+        tar -tzf kodiak-0.2.0.tar.gz | head -20
 
+    # 其余步骤保持不变...
     - name: Delete existing release if present
       id: delete-release
       uses: actions/github-script@v7
@@ -63,21 +108,16 @@ jobs:
               repo: context.repo.repo,
               tag: 'v0.2.0'
             });
-            
-            // 删除现有发布
             await github.rest.repos.deleteRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.data.id
             });
-            
-            // 删除现有标签
             await github.rest.git.deleteRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: 'tags/v0.2.0'
             });
-            
             console.log('Deleted existing v0.2.0 release and tag');
           } catch (error) {
             if (error.status === 404) {
@@ -97,10 +137,10 @@ jobs:
           
           Rust game engine for web-games.
           
-          ## Contents
-          - Source code
-          - Release binaries
-          - WebAssembly builds
+          ## Build Information
+          - **Rust Version:** stable
+          - **Build Date:** $(date -u)
+          - **Targets:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
           
           ## SHA256 Checksum
           `$(cat kodiak-0.2.0.tar.gz.sha256)`
@@ -120,4 +160,4 @@ jobs:
         path: |
           kodiak-0.2.0.tar.gz
           kodiak-0.2.0.tar.gz.sha256
-        retention-days: 30
+
