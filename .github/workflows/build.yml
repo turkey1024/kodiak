@@ -1,0 +1,23 @@
+name: Run release_kodiak.sh
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  # 如果需要手动触发，取消下面的注释
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set execute permission for release_kodiak.sh
+      run: chmod +x makefiles/release_kodiak.sh
+      
+    - name: Run release_kodiak.sh
+      run: ./makefiles/release_kodiak.sh
