@@ -16,81 +16,91 @@ jobs:
         fetch-depth: 0
 
     - name: Find compatible nightly version
-      id: find_version
+      id: find_compatible_version
       run: |
-        # 尝试几个已知兼容的 nightly 版本
-        VERSIONS=(
-          "2024-04-20"  # 原始版本，但缺少 edition2024
+        # 测试不同版本的兼容性
+        COMPATIBLE_VERSIONS=()
+        
+        # 测试的版本范围（从新到旧）
+        VERSIONS_TO_TEST=(
           "2024-05-15"  # 可能支持 edition2024 且 API 兼容
-          "2024-06-01"  # 另一个候选版本
-          "2024-03-15"  # 更早的版本
+          "2024-05-01"  # 另一个候选版本
+          "2024-04-25"  # 接近原始版本但可能支持 edition2024
+          "2024-04-20"  # 原始版本
+          "2024-04-15"  # 稍早版本
+          "2024-04-01"  # 更早版本
         )
         
-        for version in "${VERSIONS[@]}"; do
-          echo "尝试安装 nightly-$version"
-          if rustup toolchain install nightly-$version --profile minimal; then
-            echo "成功安装 nightly-$version"
-            echo "version=$version" >> $GITHUB_OUTPUT
-            break
+        for version in "${VERSIONS_TO_TEST[@]}"; do
+          echo "测试 nightly-$version 兼容性..."
+          
+          # 安装工具链
+          if rustup toolchain install nightly-$version --profile minimal >/dev/null 2>&1; then
+            echo "✓ 成功安装 nightly-$version"
+            
+            # 设置环境变量使用该工具链
+            export RUSTUP_TOOLCHAIN="nightly-$version"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            
+            # 测试基本编译
+            if cargo +nightly-$version check --workspace >/dev/null 2>&1; then
+              echo "✓ nightly-$version 编译测试通过"
+              COMPATIBLE_VERSIONS+=("$version")
+              
+              # 检查是否支持 edition2024
+              if cargo +nightly-$version check 2>&1 | grep -q "edition2024"; then
+                echo "✓ nightly-$version 支持 edition2024"
+                echo "version=$version" >> $GITHUB_OUTPUT
+                echo "使用兼容版本: nightly-$version"
+                exit 0
+              else
+                echo "✗ nightly-$version 不支持 edition2024，继续测试..."
+              fi
+            else
+              echo "✗ nightly-$version 编译失败"
+            fi
+          else
+            echo "✗ 无法安装 nightly-$version"
           fi
         done
         
-        # 如果所有指定版本都失败，回退到最新版本
-        if [ -z "${{ steps.find_version.outputs.version }}" ]; then
-          echo "使用最新 nightly 版本"
+        # 如果没有找到完美版本，使用第一个兼容版本
+        if [ ${#COMPATIBLE_VERSIONS[@]} -gt 0 ]; then
+          echo "使用兼容版本: nightly-${COMPATIBLE_VERSIONS[0]}"
+          echo "version=${COMPATIBLE_VERSIONS[0]}" >> $GITHUB_OUTPUT
+        else
+          echo "没有找到兼容版本，使用最新 nightly"
           rustup toolchain install nightly --profile minimal
-          echo "version=nightly" >> $GITHUB_OUTPUT
+          echo "version=latest" >> $GITHUB_OUTPUT
         fi
 
-    - name: Setup Rust toolchain
+    - name: Setup selected toolchain
       run: |
-        if [ "${{ steps.find_version.outputs.version }}" = "nightly" ]; then
+        if [ "${{ steps.find_compatible_version.outputs.version }}" = "latest" ]; then
           rustup default nightly
+          TOOLCHAIN="nightly"
         else
-          rustup default nightly-${{ steps.find_version.outputs.version }}
+          rustup default nightly-${{ steps.find_compatible_version.outputs.version }}
+          TOOLCHAIN="nightly-${{ steps.find_compatible_version.outputs.version }}"
         fi
         
-        rustup target add wasm32-unknown-unknown
-        rustup component add rustfmt
-        rustup component add clippy
+        rustup target add wasm32-unknown-unknown --toolchain $TOOLCHAIN
+        rustup component add rustfmt --toolchain $TOOLCHAIN
+        rustup component add clippy --toolchain $TOOLCHAIN
         
-        echo "=== 当前工具链信息 ==="
+        echo "=== 最终选择的工具链 ==="
         rustc --version
         cargo --version
+        echo "工具链: $TOOLCHAIN"
 
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev
 
-    - name: Check and update dependencies
+    - name: Build workspace
       run: |
-        echo "=== 检查依赖兼容性 ==="
-        # 尝试更新到兼容的依赖版本
-        cargo update
-        cargo tree
-
-    - name: Build with fallback strategy
-      run: |
-        echo "=== 尝试构建工作空间 ==="
-        
-        # 首先尝试正常构建
-        if cargo build --release --workspace; then
-          echo "构建成功"
-          exit 0
-        fi
-        
-        echo "正常构建失败，尝试修复依赖..."
-        
-        # 如果构建失败，尝试修复 minicdn_macros 依赖
-        if grep -q "minicdn_macros" Cargo.lock; then
-          echo "检测到 minicdn_macros 依赖，尝试修复..."
-          # 尝试使用固定版本或替代方案
-          cargo update -p minicdn_macros
-        fi
-        
-        # 再次尝试构建
-        echo "=== 第二次构建尝试 ==="
+        echo "=== 构建工作空间 ==="
         cargo build --release --workspace
 
     - name: Build WebAssembly target
@@ -106,7 +116,6 @@ jobs:
     - name: Create release package
       run: |
         echo "=== 创建发布包 ==="
-        # 创建版本目录
         mkdir -p kodiak-0.2.0
         
         # 复制根目录文件
@@ -138,7 +147,6 @@ jobs:
         echo "发布包内容预览:"
         tar -tzf kodiak-0.2.0.tar.gz | head -20
         echo "包大小: $(du -h kodiak-0.2.0.tar.gz)"
-        echo "SHA256 校验和: $(cat kodiak-0.2.0.tar.gz.sha256)"
 
     - name: Delete existing release if present
       id: delete-release
@@ -185,11 +193,6 @@ jobs:
           - **构建日期:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           - **Rust 版本:** $(rustc --version)
           - **目标平台:** x86_64-unknown-linux-gnu, wasm32-unknown-unknown
-          
-          ## 包含内容
-          - 完整的源代码
-          - 编译后的二进制文件
-          - WebAssembly 模块
           
           ## SHA256 校验和
           `$(cat kodiak-0.2.0.tar.gz.sha256)`
