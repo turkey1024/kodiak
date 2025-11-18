@@ -90,7 +90,7 @@ impl GameConstants {
     pub fn hostname(&self, server_id: ServerId) -> String {
         match server_id.kind {
             ServerKind::Cloud => format!("{}.{}", server_id.number, self.domain),
-            ServerKind::Local => "mk48.io".into(),  // 修改这里：从 "localhost:8443" 改为 "mk48.io"
+            ServerKind::Local => "localhost:8443".into(),
         }
     }
 
@@ -121,5 +121,3 @@ impl PartialEq for GameConstants {
         true
     }
 }
-
-
