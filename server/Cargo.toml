@@ -21,7 +21,7 @@ axum-tws = { version = "0.4", git = "https://github.com/finnbear/axum-tws", bran
 base64 = "0.22.1"
 tokio-websockets = { version = "0.10.1", default-features = false, features = ["client", "rand", "ring", "rustls-webpki-roots", "simd"] }
 bytes = "1"
-clap = { version = "4.4.6", default-features = false, features = ["derive", "std"] }
+clap = { version = "3.2", default-features = false, features = ["derive", "std"] }
 db_ip = "0.3.11"
 dhat = "0.3.3"
 futures = "0.3"
