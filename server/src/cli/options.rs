@@ -2,106 +2,106 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 use crate::{RegionId, ServerId, ServerKind, ServerToken};
-use clap::{Parser, command};
+use clap::Parser;
 use log::LevelFilter;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
 /// Server options, to be specified as arguments.
 #[derive(Debug, Parser)]
-#[command(name = "kodiak_server")]
+#[clap(name = "kodiak_server")]
 pub struct Options {
     /// Override bot count to a constant.
-    #[arg(long)]
+    #[clap(long)]
     pub bots: Option<u16>,
     
     /// Log incoming HTTP requests
-    #[arg(long, default_value = "info")]
+    #[clap(long, default_value = "info")]
     pub debug_http: String,
     
     /// Log game diagnostics
-    #[arg(long, default_value = "info")]
+    #[clap(long, default_value = "info")]
     pub debug_game: String,
     
     /// Log game engine diagnostics
-    #[arg(long, default_value = "warn")]
+    #[clap(long, default_value = "warn")]
     pub debug_engine: String,
     
     /// Log plasma diagnostics
-    #[arg(long, default_value = "warn")]
+    #[clap(long, default_value = "warn")]
     pub debug_plasma: String,
     
-    #[arg(long, default_value = "./domain_backup.json")]
+    #[clap(long, default_value = "./domain_backup.json")]
     pub domain_backup: String,
     
     /// Server ID.
-    #[arg(long)]
+    #[clap(long)]
     server_id: Option<ServerId>,
     
     /// Alternative to `server_id`.
-    #[arg(long)]
+    #[clap(long)]
     hostname: Option<String>,
     
     /// Initial secret key unique to this server.
-    #[arg(long)]
+    #[clap(long)]
     pub server_token: Option<ServerToken>,
     
+    #[clap(long)]
     /// Override the server ipv4.
-    #[arg(long)]
     pub ipv4_address: Option<Ipv4Addr>,
     
+    #[clap(long)]
     /// Override the server ipv6 (currently unused).
-    #[arg(long)]
     pub ipv6_address: Option<Ipv6Addr>,
     
-    #[arg(long)]
+    #[clap(long)]
     pub http_port: Option<u16>,
     
-    #[arg(long)]
+    #[clap(long)]
     pub https_port: Option<u16>,
     
     /// Override the region id.
-    #[arg(long)]
+    #[clap(long)]
     pub region_id: Option<RegionId>,
     
     /// Domain (without server id prepended).
     #[allow(dead_code)]
     #[deprecated = "now from game id"]
-    #[arg(long)]
+    #[clap(long)]
     pub domain: Option<String>,
     
     /// Certificate chain path.
-    #[arg(long)]
+    #[clap(long)]
     #[deprecated]
     pub certificate_path: Option<String>,
     
     /// Private key path.
-    #[arg(long)]
+    #[clap(long)]
     #[deprecated]
     pub private_key_path: Option<String>,
     
     /// HTTP request bandwidth limiting (in bytes per second).
-    #[arg(long, default_value = "500000")]
+    #[clap(long, default_value = "500000")]
     pub http_bandwidth_limit: u32,
     
     /// HTTP request rate limiting burst (in bytes).
     ///
     /// Implicit minimum is double the total size of the client static files.
-    #[arg(long)]
+    #[clap(long)]
     pub http_bandwidth_burst: Option<u32>,
     
     /// Client authenticate rate limiting period (in seconds).
-    #[arg(long, default_value = "10")]
+    #[clap(long, default_value = "10")]
     pub client_authenticate_rate_limit: u64,
     
     /// Client authenticate rate limiting burst.
-    #[arg(long, default_value = "16")]
+    #[clap(long, default_value = "16")]
     pub client_authenticate_burst: u32,
     
-    #[arg(long)]
+    #[clap(long)]
     pub cpu_profile: bool,
     
-    #[arg(long)]
+    #[clap(long)]
     pub heap_profile: bool,
 }
 
@@ -109,7 +109,7 @@ impl Options {
     pub(crate) const STANDARD_HTTPS_PORT: u16 = 443;
     pub(crate) const STANDARD_HTTP_PORT: u16 = 80;
     
-    // 转换字符串为 LevelFilter
+    // 转换方法：将字符串转换为 LevelFilter
     pub fn debug_http_filter(&self) -> LevelFilter {
         LevelFilter::from_str(&self.debug_http).unwrap_or(LevelFilter::Info)
     }
@@ -176,4 +176,3 @@ impl Options {
         ports
     }
 }
-
